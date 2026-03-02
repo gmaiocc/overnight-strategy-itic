@@ -3,7 +3,7 @@ import json
 from datetime import datetime
 from typing import Dict, Any, Optional
 
-ACCESS_TOKEN = "eyJhbGciOiJFUzI1NiIsIng1dCI6IjI3RTlCOTAzRUNGMjExMDlBREU1RTVCOUVDMDgxNkI2QjQ5REEwRkEifQ.eyJvYWEiOiI3Nzc3NSIsImlzcyI6Im9hIiwiYWlkIjoiMTA5IiwidWlkIjoiY0o5TEVxd0lySmoxZEpBbmNKa1hRZz09IiwiY2lkIjoiY0o5TEVxd0lySmoxZEpBbmNKa1hRZz09IiwiaXNhIjoiRmFsc2UiLCJ0aWQiOiIyMDAyIiwic2lkIjoiMzA4NDU5YTJjMmY0NGY0OGI5M2VlMTEyZmMwMTFjZTgiLCJkZ2kiOiI4NCIsImV4cCI6IjE3NTY5MDYwNDIiLCJvYWwiOiIxRiIsImlpZCI6ImMwNzk5NmY5ZGUxNjRjZDJmMTQ0MDhkZGU3ODAwNDMzIn0.BNSVBMcMQbTy_hWeiU_DsIdiJQyEhkeuv7kfArevmBPtQXYJoiBzy3pLlvM6jJ-6X8vN3BfVzAwhBX_TZe9g1g"
+ACCESS_TOKEN = "eyJhbGciOiJFUzI1NiIsIng1dCI6IjY3NEM0MjFEMzZEMUE1OUNFNjFBRTIzMjMyOTVFRTAyRTc3MDMzNTkifQ.eyJvYWEiOiI3Nzc3NSIsImlzcyI6Im9hIiwiYWlkIjoiMTA5IiwidWlkIjoiY0dsMk8xVGUxdmdOaW18b1BxR0phdz09IiwiY2lkIjoiY0dsMk8xVGUxdmdOaW18b1BxR0phdz09IiwiaXNhIjoiRmFsc2UiLCJ0aWQiOiIyMDAyIiwic2lkIjoiMmIwZTlhMWUyZjI5NDRjMDhhMzI5NWIyOTFjNmZlNzEiLCJkZ2kiOiI4NCIsImV4cCI6IjE3NzI0OTg5NjAiLCJvYWwiOiIxRiIsImlpZCI6ImY0Y2U4MTI4MTJlNzRmOTM2OGE2MDhkZTZmMDBkZTAwIn0.Up7Gw1suvrh2pk7riDz6XjiIOvBruJR6T2IoyA9fTidN9mLBLFma2RJIyDitFlo6pWWS0keRqj-lxgyFTbpESQ"
 BASE_URL = "https://gateway.saxobank.com/sim/openapi"
 
 # User ID: 21950270
@@ -121,12 +121,17 @@ class SaxoOrderExecutor:
 if __name__ == "__main__":
     executor = SaxoOrderExecutor(BASE_URL, ACCESS_TOKEN)
     if executor.connect():
+        print(f"Connected! AccountKey: {executor.account_key}")
+
+        uic = executor.get_uic("AAPL", asset_type="Stock")
+        print(f"AAPL UIC: {uic}")
+
         result = executor.execute_order({
             "action": "BUY",
-            "symbol": "TQQQ",
-            "uic": 46959,
+            "symbol": "AAPL",
+            "uic": uic,
             "quantity": 1,
-            "asset_type": "CfdOnEtf",
+            "asset_type": "Stock",
             "order_type": "Market"
         })
-        print(f"Order Success: {result.get('success')}")
+        print(f"Full result: {result}")
