@@ -1,12 +1,12 @@
 import requests
 import json
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 ACCESS_TOKEN = "eyJhbGciOiJFUzI1NiIsIng1dCI6IjI3RTlCOTAzRUNGMjExMDlBREU1RTVCOUVDMDgxNkI2QjQ5REEwRkEifQ.eyJvYWEiOiI3Nzc3NSIsImlzcyI6Im9hIiwiYWlkIjoiMTA5IiwidWlkIjoiY0o5TEVxd0lySmoxZEpBbmNKa1hRZz09IiwiY2lkIjoiY0o5TEVxd0lySmoxZEpBbmNKa1hRZz09IiwiaXNhIjoiRmFsc2UiLCJ0aWQiOiIyMDAyIiwic2lkIjoiMzA4NDU5YTJjMmY0NGY0OGI5M2VlMTEyZmMwMTFjZTgiLCJkZ2kiOiI4NCIsImV4cCI6IjE3NTY5MDYwNDIiLCJvYWwiOiIxRiIsImlpZCI6ImMwNzk5NmY5ZGUxNjRjZDJmMTQ0MDhkZGU3ODAwNDMzIn0.BNSVBMcMQbTy_hWeiU_DsIdiJQyEhkeuv7kfArevmBPtQXYJoiBzy3pLlvM6jJ-6X8vN3BfVzAwhBX_TZe9g1g"
 BASE_URL = "https://gateway.saxobank.com/sim/openapi"
 
-#User ID: 21950270 
+# User ID: 21950270
 # Password: 9vs0
 
 class SaxoOrderExecutor:
@@ -32,19 +32,39 @@ class SaxoOrderExecutor:
             print(f"Connection error: {e}")
             return False
 
+    def get_uic(self, symbol: str, asset_type: str = "Stock") -> Optional[int]:
+        try:
+            response = self.session.get(
+                f"{self.base_url}/ref/v1/instruments",
+                params={"Keywords": symbol, "AssetTypes": asset_type}
+            )
+            response.raise_for_status()
+            data = response.json().get("Data", [])
+            if not data:
+                print(f"[{symbol}] No UIC found.")
+                return None
+            # Prefer exact symbol match
+            for instrument in data:
+                if instrument.get("Symbol") == symbol:
+                    return instrument["Identifier"]
+            return data[0]["Identifier"]  # fallback to first result
+        except Exception as e:
+            print(f"[{symbol}] Error resolving UIC: {e}")
+            return None
+
     def execute_order(self, order_params: Dict[str, Any]) -> Dict[str, Any]:
         if not self.account_key:
             return {"success": False, "error": "Account not connected"}
-        
+
         required = ["action", "symbol", "uic", "quantity", "asset_type"]
         missing = [field for field in required if field not in order_params]
         if missing:
             return {"success": False, "error": f"Missing required fields: {missing}"}
-        
+
         action = order_params["action"].upper()
         if action not in ["BUY", "SELL"]:
             return {"success": False, "error": "Action must be BUY or SELL"}
-        
+
         order = {
             "AccountKey": self.account_key,
             "Amount": int(order_params["quantity"]),
@@ -55,15 +75,15 @@ class SaxoOrderExecutor:
             "ManualOrder": True,
             "OrderDuration": {"DurationType": "DayOrder"}
         }
-        
+
         if order["OrderType"] == "Limit" and "limit_price" in order_params:
             order["OrderPrice"] = float(order_params["limit_price"])
-        
+
         try:
             response = self.session.post(f"{self.base_url}/trade/v2/orders", json=order)
             if response.status_code not in [200, 201]:
                 return {"success": False, "error": f"HTTP {response.status_code}", "details": response.text}
-            
+
             response_data = response.json()
             return {
                 "success": True,
@@ -96,6 +116,7 @@ class SaxoOrderExecutor:
             return {"success": True, "data": response.json()}
         except Exception as e:
             return {"success": False, "error": str(e)}
+
 
 if __name__ == "__main__":
     executor = SaxoOrderExecutor(BASE_URL, ACCESS_TOKEN)
