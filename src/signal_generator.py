@@ -15,7 +15,8 @@ print(f"Found {len(tickers)} tickers.")
 # Fetch OHLCV
 PERIOD = '1y'
 
-data = yf.download(tickers, period=PERIOD, auto_adjust=True, group_by='ticker', progress=False)
+# Linha 18 (aproximadamente)
+data = yf.download(tickers, period=PERIOD, auto_adjust=True, group_by='ticker', progress=True)
 
 raw = {}
 for ticker in tickers:

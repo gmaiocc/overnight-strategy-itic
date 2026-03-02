@@ -1,30 +1,49 @@
+import os
 import time
 import json
+import glob
 import zoneinfo
 from datetime import datetime
 from typing import List
 from pathlib import Path
+from dotenv import load_dotenv
 
 from SaxoOrderExecutor import SaxoOrderExecutor
 
-ACCESS_TOKEN = "eyJhbGciOiJFUzI1NiIsIng1dCI6IjI3RTlCOTAzRUNGMjExMDlBREU1RTVCOUVDMDgxNkI2QjQ5REEwRkEifQ.eyJvYWEiOiI3Nzc3NSIsImlzcyI6Im9hIiwiYWlkIjoiMTA5IiwidWlkIjoiY0o5TEVxd0lySmoxZEpBbmNKa1hRZz09IiwiY2lkIjoiY0o5TEVxd0lySmoxZEpBbmNKa1hRZz09IiwiaXNhIjoiRmFsc2UiLCJ0aWQiOiIyMDAyIiwic2lkIjoiMzA4NDU5YTJjMmY0NGY0OGI5M2VlMTEyZmMwMTFjZTgiLCJkZ2kiOiI4NCIsImV4cCI6IjE3NTY5MDYwNDIiLCJvYWwiOiIxRiIsImlpZCI6ImMwNzk5NmY5ZGUxNjRjZDJmMTQ0MDhkZGU3ODAwNDMzIn0.BNSVBMcMQbTy_hWeiU_DsIdiJQyEhkeuv7kfArevmBPtQXYJoiBzy3pLlvM6jJ-6X8vN3BfVzAwhBX_TZe9g1g"
-BASE_URL = "https://gateway.saxobank.com/sim/openapi"
+load_dotenv()
+
+ACCESS_TOKEN = os.getenv("SAXO_ACCESS_TOKEN")
+BASE_URL = os.getenv("SAXO_BASE_URL", "https://gateway.saxobank.com/sim/openapi")
 
 
-def load_tickers_from_json(filename: str = 'signals/signals_20260227_1030.json') -> List[str]:
-    script_path = Path(__file__).resolve()       # src/automation.py
-    project_root = script_path.parent.parent     # go up two levels to project root
-    json_path = project_root / 'signals' / 'signals_20260227_1030.json'
-    with open(json_path, 'r') as json_file:
-        data = json.load(json_file)
-    tickers = data['stocks']
-    print(f"Loaded {len(tickers)} tickers: {tickers}")
-    return data.get("stocks", [])
+def load_tickers_from_json() -> List[str]:
+    """Carrega automaticamente o ficheiro de sinais mais recente da pasta signals/."""
+    script_path = Path(__file__).resolve()
+    project_root = script_path.parent.parent
+    signals_dir = project_root / 'signals'
+
+    # Procura todos os ficheiros de sinais e ordena pelo mais recente
+    pattern = str(signals_dir / 'signals_*.json')
+    files = sorted(glob.glob(pattern), reverse=True)
+
+    if not files:
+        raise FileNotFoundError(f"Nenhum ficheiro de sinais encontrado em: {signals_dir}")
+
+    latest = files[0]
+    print(f"A usar ficheiro de sinais: {latest}")
+
+    with open(latest, 'r') as f:
+        data = json.load(f)
+
+    tickers = data.get('stocks', [])
+    signal_date = data.get('date', 'desconhecida')
+    print(f"Data dos sinais: {signal_date} | Tickers carregados ({len(tickers)}): {tickers}")
+    return tickers
 
 
 def should_buy() -> bool:
     now = datetime.now(zoneinfo.ZoneInfo("Europe/London"))
-    return now.hour == 20 and now.minute >= 55  # FIX: was hour==21 AND hour==20 (impossible)
+    return now.hour == 20 and now.minute >= 55
 
 
 def should_sell() -> bool:
@@ -35,7 +54,7 @@ def should_sell() -> bool:
 def buy_orders(executor: SaxoOrderExecutor, tickers: List[str], quantity: int = 1) -> List[dict]:
     orders = []
     for t in tickers:
-        uic = executor.get_uic(t)  # FIX: resolve UIC per ticker instead of hardcoding 46959
+        uic = executor.get_uic(t)
         if uic is None:
             print(f"[{t}] Skipping — could not resolve UIC")
             continue
@@ -43,7 +62,7 @@ def buy_orders(executor: SaxoOrderExecutor, tickers: List[str], quantity: int = 
             "action": "BUY",
             "symbol": t,
             "uic": uic,
-            "quantity": quantity,  # depends risk management
+            "quantity": quantity,
             "asset_type": "Stock",
             "order_type": "Market",
         })
@@ -61,7 +80,7 @@ def sell_orders(executor: SaxoOrderExecutor, tickers: List[str], quantity: int =
             "action": "SELL",
             "symbol": t,
             "uic": uic,
-            "quantity": quantity,  # depends risk management
+            "quantity": quantity,
             "asset_type": "Stock",
             "order_type": "Market",
         })
@@ -69,6 +88,10 @@ def sell_orders(executor: SaxoOrderExecutor, tickers: List[str], quantity: int =
 
 
 if __name__ == "__main__":
+    if not ACCESS_TOKEN:
+        print("ERRO: SAXO_ACCESS_TOKEN não definido no ficheiro .env — aborting.")
+        exit(1)
+
     executor = SaxoOrderExecutor(BASE_URL, ACCESS_TOKEN)
     if not executor.connect():
         print("Could not connect to Saxo Bank API — aborting.")

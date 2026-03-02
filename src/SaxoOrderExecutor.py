@@ -1,13 +1,15 @@
+import os
 import requests
 import json
 from datetime import datetime
 from typing import Dict, Any, Optional
+from dotenv import load_dotenv
 
-ACCESS_TOKEN = "eyJhbGciOiJFUzI1NiIsIng1dCI6IjI3RTlCOTAzRUNGMjExMDlBREU1RTVCOUVDMDgxNkI2QjQ5REEwRkEifQ.eyJvYWEiOiI3Nzc3NSIsImlzcyI6Im9hIiwiYWlkIjoiMTA5IiwidWlkIjoiY0o5TEVxd0lySmoxZEpBbmNKa1hRZz09IiwiY2lkIjoiY0o5TEVxd0lySmoxZEpBbmNKa1hRZz09IiwiaXNhIjoiRmFsc2UiLCJ0aWQiOiIyMDAyIiwic2lkIjoiMzA4NDU5YTJjMmY0NGY0OGI5M2VlMTEyZmMwMTFjZTgiLCJkZ2kiOiI4NCIsImV4cCI6IjE3NTY5MDYwNDIiLCJvYWwiOiIxRiIsImlpZCI6ImMwNzk5NmY5ZGUxNjRjZDJmMTQ0MDhkZGU3ODAwNDMzIn0.BNSVBMcMQbTy_hWeiU_DsIdiJQyEhkeuv7kfArevmBPtQXYJoiBzy3pLlvM6jJ-6X8vN3BfVzAwhBX_TZe9g1g"
-BASE_URL = "https://gateway.saxobank.com/sim/openapi"
+load_dotenv()
 
-# User ID: 21950270
-# Password: 9vs0
+ACCESS_TOKEN = os.getenv("SAXO_ACCESS_TOKEN")
+BASE_URL = os.getenv("SAXO_BASE_URL", "https://gateway.saxobank.com/sim/openapi")
+
 
 class SaxoOrderExecutor:
     def __init__(self, base_url: str, access_token: str):
@@ -43,7 +45,6 @@ class SaxoOrderExecutor:
             if not data:
                 print(f"[{symbol}] No UIC found.")
                 return None
-            # Prefer exact symbol match
             for instrument in data:
                 if instrument.get("Symbol") == symbol:
                     return instrument["Identifier"]
@@ -119,6 +120,10 @@ class SaxoOrderExecutor:
 
 
 if __name__ == "__main__":
+    if not ACCESS_TOKEN:
+        print("ERRO: SAXO_ACCESS_TOKEN não definido no .env")
+        exit(1)
+
     executor = SaxoOrderExecutor(BASE_URL, ACCESS_TOKEN)
     if executor.connect():
         result = executor.execute_order({
