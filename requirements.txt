@@ -1,0 +1,16 @@
+# Data
+pandas>=1.5.0
+numpy>=1.23.0
+yfinance>=0.2.0
+
+# HTTP
+requests>=2.28.0
+
+# Environment
+python-dotenv>=1.0.0
+
+# Visualização (backtest)
+matplotlib>=3.6.0
+
+# Utilities
+python-dateutil>=2.8.0
