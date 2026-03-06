@@ -52,7 +52,6 @@ def load_latest_signals() -> list:
     print(f"Loaded {len(tickers)} tickers: {tickers}")
     return tickers
 
-
 def should_run_signals() -> bool:
     now = now_london()
     return now.hour == 20 and 30 <= now.minute < 35

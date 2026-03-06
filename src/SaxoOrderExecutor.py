@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 from datetime import datetime
 from typing import Dict, Any, Optional
@@ -9,6 +10,9 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 ACCESS_TOKEN = os.getenv("SAXO_ACCESS_TOKEN")
 BASE_URL     = os.getenv("SAXO_BASE_URL")
+
+MAX_RETRIES = 3
+RETRY_DELAY = 2  # seconds
 
 
 class SaxoOrderExecutor:
@@ -80,20 +84,26 @@ class SaxoOrderExecutor:
         if order["OrderType"] == "Limit" and "limit_price" in order_params:
             order["OrderPrice"] = float(order_params["limit_price"])
 
-        try:
-            response = self.session.post(f"{self.base_url}/trade/v2/orders", json=order)
-            if response.status_code not in [200, 201]:
-                return {"success": False, "error": f"HTTP {response.status_code}", "details": response.text}
+        # Retry logic
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                response = self.session.post(f"{self.base_url}/trade/v2/orders", json=order)
+                if response.status_code in [200, 201]:
+                    response_data = response.json()
+                    return {
+                        "success": True,
+                        "order_id": response_data.get('OrderId'),
+                        "status": "Executed",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                print(f"[{order_params['symbol']}] Attempt {attempt}/{MAX_RETRIES} failed: HTTP {response.status_code}")
+            except Exception as e:
+                print(f"[{order_params['symbol']}] Attempt {attempt}/{MAX_RETRIES} error: {e}")
 
-            response_data = response.json()
-            return {
-                "success": True,
-                "order_id": response_data.get('OrderId'),
-                "status": "Executed",
-                "timestamp": datetime.now().isoformat()
-            }
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+            if attempt < MAX_RETRIES:
+                time.sleep(RETRY_DELAY)
+
+        return {"success": False, "error": f"Failed after {MAX_RETRIES} attempts"}
 
     def get_positions(self) -> Dict[str, Any]:
         try:
@@ -120,9 +130,8 @@ class SaxoOrderExecutor:
 
 
 if __name__ == "__main__":
-    # Validar que as variáveis foram carregadas
     if not ACCESS_TOKEN or not BASE_URL:
-        raise EnvironmentError("SAXO_ACCESS_TOKEN ou SAXO_BASE_URL não encontrados no .env")
+        raise EnvironmentError("SAXO_ACCESS_TOKEN or SAXO_BASE_URL not found in .env")
 
     executor = SaxoOrderExecutor(BASE_URL, ACCESS_TOKEN)
     if executor.connect():
