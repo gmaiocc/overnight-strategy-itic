@@ -26,8 +26,8 @@ warnings.filterwarnings("ignore")
 START_DATE       = "2023-01-01"
 END_DATE         = "2026-03-06"
 MOMENTUM_WINDOW  = 126
-LONG_N           = 5
-SHORT_N          = 5
+LONG_N           = 10
+SHORT_N          = 10
 MA50_WINDOW      = 50
 RISK_FREE_RATE   = 0.0
 CAPITAL_INIT     = 10_000.0
@@ -168,12 +168,12 @@ def run_longshort(clean_data: dict, spy_df: pd.DataFrame) -> dict:
         candidates.sort(key=lambda x: x["momentum"], reverse=True)
 
         if above_ma50:
-            # LONG top-5: profit from overnight premium in bull regime
+            # LONG top-10: profit from overnight premium in bull regime
             leg = candidates[:LONG_N]
             ret = np.mean([x["return"] for x in leg])
             stat["long"] += 1
         else:
-            # SHORT bottom-5: profit from overnight discount/reversal in bear regime
+            # SHORT bottom-10: profit from overnight discount/reversal in bear regime
             leg = candidates[-SHORT_N:]
             ret = np.mean([-x["return"] for x in leg])
             stat["short"] += 1
@@ -276,7 +276,7 @@ def plot_equity(baseline, ls):
             ax.plot(ds_b, es_b, label="Baseline (Long-Only TOP-10)",
                     color=COLOR_BASELINE, linewidth=1.8)
         if ds_l:
-            ax.plot(ds_l, es_l, label="L/S Regime (TOP-5↑ SPY>MA50 / BOTTOM-5↓ SPY<MA50)",
+            ax.plot(ds_l, es_l, label="L/S Regime (TOP-10↑ SPY>MA50 / BOTTOM-10↓ SPY<MA50)",
                     color=COLOR_LS, linewidth=1.8, linestyle="--")
         ax.axhline(CAPITAL_INIT, color="#BBBBBB", linewidth=0.7, linestyle=":", zorder=0)
         ax.set_title(title, loc="left", fontsize=10, fontweight="bold", pad=6)
@@ -308,9 +308,6 @@ def plot_equity(baseline, ls):
 
     fig.suptitle("Overnight Effect — Baseline vs. MA50 Long/Short Regime",
                  fontsize=13, fontweight="bold")
-    fig.text(0.5, 0.93,
-             f"SPY > MA50 → Long TOP-{LONG_N}  |  SPY ≤ MA50 → Short BOTTOM-{SHORT_N}  |  126-day momentum",
-             ha="center", fontsize=9, color="#555555", style="italic")
 
     plt.savefig("ls_fig1_equity.png", dpi=200, bbox_inches="tight",
                 facecolor="white", edgecolor="none")
@@ -341,7 +338,7 @@ def plot_drawdown(baseline, ls):
     ax.plot(baseline["dates"], dd_b, color=COLOR_DD_BASE, linewidth=1.6,
             label="Baseline (Long-Only TOP-10)")
     ax.plot(ls["dates"],       dd_l, color=COLOR_DD_LS,   linewidth=1.6,
-            linestyle="--", label="L/S Regime (TOP-5 / BOTTOM-5)")
+            linestyle="--", label="L/S Regime (TOP-10 / BOTTOM-10)")
 
     ax.axhline(0, color="#AAAAAA", linewidth=0.7, linestyle=":", zorder=0)
     ax.set_ylabel("Drawdown (%)", labelpad=6)

@@ -84,7 +84,6 @@ class SaxoOrderExecutor:
         if order["OrderType"] == "Limit" and "limit_price" in order_params:
             order["OrderPrice"] = float(order_params["limit_price"])
 
-        # Retry logic
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 response = self.session.post(f"{self.base_url}/trade/v2/orders", json=order)
