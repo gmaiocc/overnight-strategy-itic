@@ -50,12 +50,12 @@ def passes_liquidity(df, min_dv=10_000_000):
 universe = {t: df for t, df in raw.items() if passes_liquidity(df)}
 print(f'Universe after liquidity filter: {len(universe)} tickers')
 
-# Signal generator
+# Signal generator 126d cumulative overnight momentum
 signals = []
 for ticker, df in universe.items():
     if len(df) < 130:
         continue
-    df = df.sort_index()  # ensure chronological order before shift
+    df = df.sort_index()
     df['overnight_return'] = (df['open'] / df['close'].shift(1)) - 1
     cum_overnight = (1 + df['overnight_return']).tail(126).prod() - 1
     signals.append({'ticker': ticker, 'cum_overnight_126d': cum_overnight})
