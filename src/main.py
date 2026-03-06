@@ -53,15 +53,15 @@ def load_latest_signals() -> list:
 
 def should_run_signals() -> bool:
     now = now_london()
-    return now.hour == 20 and 30 <= now.minute < 35
+    return now.hour == 17 and 00 <= now.minute < 10
 
 def should_buy() -> bool:
     now = now_london()
-    return now.hour == 20 and now.minute >= 55
+    return now.hour == 17 and now.minute >= 5
 
 def should_sell() -> bool:
     now = now_london()
-    return now.hour == 14 and 30 <= now.minute < 35
+    return now.hour == 17 and 5 <= now.minute < 7
 
 
 if __name__ == "__main__":
