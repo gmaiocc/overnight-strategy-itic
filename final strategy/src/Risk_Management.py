@@ -84,6 +84,20 @@ def calculate_position_size(capital: float, num_positions: int = None) -> float:
     logger.info(f"Position size: ${position_size:,.2f} ({MAX_POSITION_PCT * 100}% of ${capital:,.2f})")
     return position_size
 
+def calculate_position_lot_size(capital: float, price: float) -> int:
+    """
+    Calculate the number of shares to buy for a position based on capital and price.
+
+    Args:
+        capital: Total portfolio capital in USD
+        price: Current price of the stock
+    Returns:
+        Number of shares to buy (rounded down to nearest whole share)
+    """
+    position_size = calculate_position_size(capital)
+    lot_size = int(position_size // price)  # Round down to whole shares
+    logger.info(f"Calculated lot size: {lot_size} shares at ${price:.2f} for position size ${position_size:,.2f}")
+    return lot_size
 
 def check_daily_loss_limit(capital: float = None) -> bool:
     """
