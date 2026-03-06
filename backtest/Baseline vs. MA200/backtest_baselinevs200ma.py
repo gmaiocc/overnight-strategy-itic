@@ -1,7 +1,10 @@
 """
-Backtest: Day & Night Strategy — Baseline vs SPY Buy & Hold
-Overnight momentum strategy (TOP10 / 126d) compared against a passive
-SPY buy-and-hold benchmark over the same period.
+Backtest: Day & Night Strategy — Baseline vs MA200 Trend Filter
+Compares the unfiltered baseline (TOP-10 / 126d) against the same strategy
+with a MA200 filter: only enters positions when SPY is trading above its
+200-day moving average (broad market regime filter).
+
+Evaluation period: March 2024 – March 2026 (~2 years).
 """
 
 import datetime
@@ -16,16 +19,17 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
-PERIOD           = "3y"   # data download window (needs momentum history)
-COMP_DAYS        = 25          # competition: only evaluate last N trading days
+START_DATE       = "2023-01-01"   # enough history for 126d warm-up + MA200
+END_DATE         = "2026-03-06"
 TOP_N            = 10
 MOMENTUM_WINDOW  = 126
+MA_WINDOW        = 200
 RISK_FREE_RATE   = 0.0
 CAPITAL_INIT     = 10_000.0
 MIN_DOLLAR_VOL   = 10_000_000
 TRANSACTION_COST = 0.0
-LEVERAGE         = 10.0      # CFD leverage multiplier (no financing cost)
 QUICK_MODE       = False
+EVAL_START       = datetime.datetime(2024, 3, 1)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -43,12 +47,13 @@ def get_sp500_tickers() -> list:
     return []
 
 
-def fetch_spy(period: str = "5y") -> pd.DataFrame:
+def fetch_spy(start: str, end: str) -> pd.DataFrame:
     print("  Downloading SPY...")
-    spy = yf.Ticker("SPY").history(period=period, auto_adjust=True)
+    spy = yf.Ticker("SPY").history(start=start, end=end, auto_adjust=True)
     spy.index = pd.to_datetime(spy.index).tz_localize(None).normalize()
     spy.index.name = "date"
     spy = spy[~spy.index.duplicated(keep="last")].sort_index()
+    spy["MA200"] = spy["Close"].rolling(MA_WINDOW).mean()
     return spy
 
 
@@ -79,8 +84,13 @@ def build_clean_data(raw_data: pd.DataFrame, tickers: list) -> dict:
     return clean
 
 
-def run_baseline(clean_data: dict) -> dict:
-    """Long TOP_N overnight momentum stocks, equal weight, no filters."""
+def run_strategy(clean_data: dict, spy_df: pd.DataFrame,
+                 use_ma200: bool) -> dict:
+    """
+    use_ma200=False → baseline (no filter)
+    use_ma200=True  → only trade when SPY > SPY MA200
+    When filtered out, holds cash (return = 0).
+    """
     all_dates = sorted(set().union(*[set(df.index) for df in clean_data.values()]))
     all_dates = [d for d in all_dates if isinstance(d, pd.Timestamp)]
 
@@ -91,6 +101,22 @@ def run_baseline(clean_data: dict) -> dict:
 
     for i in range(MOMENTUM_WINDOW + 5, len(all_dates) - 1):
         date = all_dates[i]
+
+        # ── MA200 regime filter ───────────────────────────────────────────────
+        if use_ma200:
+            if date in spy_df.index:
+                spy_row = spy_df.loc[date]
+                if pd.isna(spy_row["MA200"]) or spy_row["Close"] < spy_row["MA200"]:
+                    equity.append(capital)
+                    daily_ret.append(0.0)
+                    dates_out.append(date)
+                    continue
+            else:
+                equity.append(capital)
+                daily_ret.append(0.0)
+                dates_out.append(date)
+                continue
+
         candidates = []
         for t, df in clean_data.items():
             if date not in df.index:
@@ -114,9 +140,7 @@ def run_baseline(clean_data: dict) -> dict:
             dates_out.append(date)
             continue
 
-        raw_ret = np.mean([x["return"] for x in top]) - 2 * TRANSACTION_COST
-        ret     = raw_ret * LEVERAGE          # CFD: leveraged return
-        ret     = max(ret, -1.0)              # capital cannot go below 0
+        ret = np.mean([x["return"] for x in top]) - 2 * TRANSACTION_COST
         capital *= (1 + ret)
         equity.append(capital)
         daily_ret.append(ret)
@@ -129,26 +153,19 @@ def run_baseline(clean_data: dict) -> dict:
     }
 
 
-def build_spy_bh(spy_df: pd.DataFrame, strategy_dates: list) -> dict:
-    """SPY buy-and-hold aligned to the same dates as the strategy."""
-    start = strategy_dates[0]
-    end   = strategy_dates[-1]
-
-    spy_window = spy_df[(spy_df.index >= pd.Timestamp(start)) &
-                        (spy_df.index <= pd.Timestamp(end))].copy()
-
-    if spy_window.empty:
-        return {"dates": strategy_dates, "equity": [CAPITAL_INIT] * len(strategy_dates)}
-
-    spy_window["equity"] = CAPITAL_INIT * (spy_window["Close"] / spy_window["Close"].iloc[0])
-
-    # Align to strategy dates (forward-fill for any gaps)
-    idx = pd.DatetimeIndex([pd.Timestamp(d) for d in strategy_dates])
-    equity_aligned = spy_window["equity"].reindex(idx, method="ffill").fillna(method="bfill")
-
+def clip_to_eval(result: dict) -> dict:
+    eval_idx = [i for i, d in enumerate(result["dates"]) if d >= EVAL_START]
+    if not eval_idx:
+        return result
+    i0 = eval_idx[0]
+    rets_clipped = result["rets"][i0:]
+    eq = [CAPITAL_INIT]
+    for r in rets_clipped[1:]:
+        eq.append(eq[-1] * (1 + r))
     return {
-        "dates":  strategy_dates,
-        "equity": equity_aligned.tolist(),
+        "dates":  result["dates"][i0:],
+        "equity": eq,
+        "rets":   rets_clipped,
     }
 
 
@@ -156,12 +173,17 @@ def build_spy_bh(spy_df: pd.DataFrame, strategy_dates: list) -> dict:
 #  METRICS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def compute_metrics(equity: list, daily_rets: list, label: str) -> dict:
+def compute_metrics(equity: list, daily_rets: list,
+                    label: str, dates: list = None) -> dict:
     total_ret = (equity[-1] / equity[0]) - 1
     n_days    = len(daily_rets)
-    ann_ret   = (1 + total_ret) ** (252 / n_days) - 1 if n_days > 0 else 0
-    vol       = np.std(daily_rets) * np.sqrt(252) if daily_rets else 0
-    sharpe    = (ann_ret - RISK_FREE_RATE) / vol if vol > 0 else 0
+    if dates and len(dates) >= 2:
+        years = (dates[-1] - dates[0]).days / 365.25
+    else:
+        years = n_days / 252
+    ann_ret  = (1 + total_ret) ** (1 / years) - 1 if years > 0 else 0
+    vol      = np.std(daily_rets) * np.sqrt(252) if daily_rets else 0
+    sharpe   = (ann_ret - RISK_FREE_RATE) / vol if vol > 0 else 0
 
     neg      = [r for r in daily_rets if r < 0]
     down_vol = np.std(neg) * np.sqrt(252) if neg else 0
@@ -199,12 +221,13 @@ def print_metrics(m: dict):
 #  PLOTTING
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def plot_comparison(baseline: dict, spy_bh: dict,
-                    m_baseline: dict, m_spy: dict):
+COLOR_BASELINE = "#2CA02C"   # green — baseline
+COLOR_MA200    = "#2166AC"   # blue  — MA200 filter
+COLOR_DD_BASE  = "#D62728"   # red   — baseline drawdown
+COLOR_DD_MA200 = "#2166AC"   # blue  — MA200 drawdown
 
-    COLOR_STRAT = "#2166AC"   # blue  — strategy
-    COLOR_SPY   = "#222222"   # black — benchmark
 
+def _rcparams():
     plt.rcParams.update({
         "font.family":       "serif",
         "font.serif":        ["Times New Roman", "DejaVu Serif", "serif"],
@@ -215,78 +238,82 @@ def plot_comparison(baseline: dict, spy_bh: dict,
         "xtick.labelsize":   9,
         "ytick.labelsize":   9,
         "legend.fontsize":   9,
-        "legend.framealpha": 0.9,
+        "legend.framealpha": 0.92,
         "legend.edgecolor":  "#CCCCCC",
         "grid.color":        "#E5E5E5",
         "grid.linewidth":    0.6,
     })
 
-    end_date   = baseline["dates"][-1]
+
+def plot_equity(baseline: dict, ma200: dict):
+    _rcparams()
     start_date = baseline["dates"][0]
-    start_12m  = end_date - datetime.timedelta(days=365)
+    end_date   = baseline["dates"][-1]
     start_6m   = end_date - datetime.timedelta(days=182)
 
-    fig = plt.figure(figsize=(14, 15))
-    gs_outer = fig.add_gridspec(3, 1, height_ratios=[2.2, 1.4, 1.4],
-                                hspace=0.32, left=0.07, right=0.97,
-                                top=0.93, bottom=0.04)
+    def clip(res, x0, x1):
+        pts = [(d, e) for d, e in zip(res["dates"], res["equity"]) if x0 <= d <= x1]
+        if not pts: return [], []
+        ds, es = zip(*pts)
+        return list(ds), list(es)
 
-    gs_top = gs_outer[0].subgridspec(1, 2, wspace=0.10)
-    ax1a = fig.add_subplot(gs_top[0])
-    ax1b = fig.add_subplot(gs_top[1])
-    ax2  = fig.add_subplot(gs_outer[1])
-    ax3  = fig.add_subplot(gs_outer[2])
-
-    # ── Helper: clip series to window ────────────────────────────────────────
-    def clip(series_dict, x_start, x_end):
-        pts = [(d, e) for d, e in zip(series_dict["dates"], series_dict["equity"])
-               if x_start <= d <= x_end]
-        if not pts:
-            return [], []
-        return zip(*pts)
-
-    def _plot_window(ax, x_start, x_end, subtitle, show_ylabel, show_legend):
-        ds_s, es_s = clip(baseline, x_start, x_end)
-        ds_b, es_b = clip(spy_bh,   x_start, x_end)
-
-        if ds_s:
-            ax.plot(list(ds_s), list(es_s), label="Overnight Strategy CFD 10x",
-                    color=COLOR_STRAT, linewidth=1.8, linestyle="-")
+    def _panel(ax, x0, x1, title, show_ylabel, show_legend):
+        ds_b, es_b = clip(baseline, x0, x1)
+        ds_m, es_m = clip(ma200,    x0, x1)
         if ds_b:
-            ax.plot(list(ds_b), list(es_b), label="SPY Buy & Hold",
-                    color=COLOR_SPY, linewidth=1.2, linestyle="--")
-
+            ax.plot(ds_b, es_b, label="Baseline (no filter)",
+                    color=COLOR_BASELINE, linewidth=1.8)
+        if ds_m:
+            ax.plot(ds_m, es_m, label="MA200 Trend Filter",
+                    color=COLOR_MA200, linewidth=1.8, linestyle="--")
         ax.axhline(CAPITAL_INIT, color="#BBBBBB", linewidth=0.7, linestyle=":", zorder=0)
-        ax.set_title(f"Panel A{subtitle} — Cumulative Value",
-                     loc="left", fontsize=10, fontweight="bold", pad=6)
+        ax.set_title(title, loc="left", fontsize=10, fontweight="bold", pad=6)
         if show_ylabel:
             ax.set_ylabel("Portfolio Value (USD)", labelpad=6)
         if show_legend:
             ax.legend(loc="upper left", handlelength=3.0)
         ax.grid(True, axis="y")
-        ax.set_xlim(x_start, x_end)
+        ax.set_xlim(x0, x1)
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%b '%y"))
-        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"${x:,.0f}"))
         ax.tick_params(axis="x", rotation=30)
 
-    _plot_window(ax1a, start_date, end_date,
-                 " (Full Period — Mar 2024 to Mar 2026)", show_ylabel=True,  show_legend=True)
-    _plot_window(ax1b, start_6m,  end_date,
-                 " (Last 6 Months)",  show_ylabel=False, show_legend=False)
+    fig, (ax1a, ax1b) = plt.subplots(1, 2, figsize=(14, 5.5),
+                                      gridspec_kw={"wspace": 0.12})
+    fig.subplots_adjust(left=0.07, right=0.97, top=0.88, bottom=0.12)
 
-    # Left panel: independent y-axis (full period)
-    full_vals  = [e for d, e in zip(baseline["dates"], baseline["equity"])]
-    full_vals += [e for d, e in zip(spy_bh["dates"],   spy_bh["equity"])]
-    ax1a.set_ylim(min(full_vals) * 0.98, max(full_vals) * 1.02)
+    _panel(ax1a, start_date, end_date,
+           "Panel A — Full Period (Mar 2024 – Mar 2026)",
+           show_ylabel=True, show_legend=True)
+    ax1a.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+    full_vals = baseline["equity"] + ma200["equity"]
+    full_vals = [v for v in full_vals if not np.isnan(v)]
+    ax1a.set_ylim(min(full_vals) * 0.97, max(full_vals) * 1.03)
 
-    # Right panel: zoom y-axis to last 6 months only
+    _panel(ax1b, start_6m, end_date,
+           "Panel A — Last 6 Months (Zoom)",
+           show_ylabel=False, show_legend=False)
+    ax1b.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
     zoom_vals  = [e for d, e in zip(baseline["dates"], baseline["equity"]) if d >= start_6m]
-    zoom_vals += [e for d, e in zip(spy_bh["dates"],   spy_bh["equity"])  if d >= start_6m]
+    zoom_vals += [e for d, e in zip(ma200["dates"],    ma200["equity"])    if d >= start_6m]
+    zoom_vals  = [v for v in zoom_vals if not np.isnan(v)]
     ax1b.set_ylim(min(zoom_vals) * 0.98, max(zoom_vals) * 1.02)
     ax1b.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"${x:,.0f}"))
 
-    # ── Panel B: Drawdown ─────────────────────────────────────────────────────
+    fig.suptitle("Overnight Effect — Baseline vs. MA200 Trend Filter",
+                 fontsize=13, fontweight="bold")
+
+    plt.savefig("ma200_fig1_equity.png", dpi=200, bbox_inches="tight",
+                facecolor="white", edgecolor="none")
+    print("  Saved: ma200_fig1_equity.png")
+    plt.close()
+
+
+def plot_drawdown(baseline: dict, ma200: dict):
+    _rcparams()
+    start_date = baseline["dates"][0]
+    end_date   = baseline["dates"][-1]
+
     def calc_dd(equity):
         peak, out = equity[0], []
         for v in equity:
@@ -294,49 +321,59 @@ def plot_comparison(baseline: dict, spy_bh: dict,
             out.append((v - peak) / peak * 100)
         return out
 
-    dd_s = calc_dd(baseline["equity"])
-    dd_b = calc_dd(spy_bh["equity"])
+    dd_b = calc_dd(baseline["equity"])
+    dd_m = calc_dd(ma200["equity"])
 
-    ax2.fill_between(baseline["dates"], dd_s, 0,
-                     alpha=0.25, color=COLOR_STRAT, zorder=1)
-    ax2.fill_between(spy_bh["dates"], dd_b, 0,
-                     alpha=0.18, color=COLOR_SPY, zorder=0)
-    ax2.plot(baseline["dates"], dd_s,
-             color=COLOR_STRAT, linewidth=1.6, label="Overnight Strategy CFD 10x")
-    ax2.plot(spy_bh["dates"], dd_b,
-             color=COLOR_SPY, linewidth=1.2, linestyle="--", label="SPY Buy & Hold")
+    fig, ax = plt.subplots(figsize=(14, 4.5))
+    fig.subplots_adjust(left=0.07, right=0.97, top=0.85, bottom=0.14)
 
-    ax2.axhline(0, color="#AAAAAA", linewidth=0.7, linestyle=":", zorder=0)
-    ax2.set_ylabel("Drawdown (%)", labelpad=6)
-    ax2.set_title("Panel B — Drawdown from Peak (Full Period)",
-                  loc="left", fontsize=10, fontweight="bold", pad=6)
-    ax2.legend(loc="lower left")
-    ax2.grid(True, axis="y")
-    ax2.set_xlim(start_date, end_date)
-    ax2.xaxis.set_major_formatter(mdates.DateFormatter("%b '%y"))
-    ax2.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+    ax.fill_between(baseline["dates"], dd_b, 0, alpha=0.20, color=COLOR_DD_BASE,  zorder=1)
+    ax.fill_between(ma200["dates"],    dd_m, 0, alpha=0.20, color=COLOR_DD_MA200, zorder=0)
+    ax.plot(baseline["dates"], dd_b, color=COLOR_DD_BASE,  linewidth=1.6,
+            label="Baseline (no filter)")
+    ax.plot(ma200["dates"],    dd_m, color=COLOR_DD_MA200, linewidth=1.6,
+            linestyle="--", label="MA200 Trend Filter")
 
-    # ── Panel C: Table ────────────────────────────────────────────────────────
-    ax3.axis("off")
+    ax.axhline(0, color="#AAAAAA", linewidth=0.7, linestyle=":", zorder=0)
+    ax.set_ylabel("Drawdown (%)", labelpad=6)
+    ax.set_title("Panel B — Drawdown from Peak (Mar 2024 – Mar 2026)",
+                 loc="left", fontsize=10, fontweight="bold", pad=6)
+    ax.legend(loc="lower left")
+    ax.grid(True, axis="y")
+    ax.set_xlim(start_date, end_date)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b '%y"))
+    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+    ax.tick_params(axis="x", rotation=30)
 
-    col_headers = ["Metric", "Overnight Strategy (CFD 10x)", "SPY Buy & Hold"]
+    plt.savefig("ma200_fig2_drawdown.png", dpi=200, bbox_inches="tight",
+                facecolor="white", edgecolor="none")
+    print("  Saved: ma200_fig2_drawdown.png")
+    plt.close()
+
+
+def plot_table(m_b: dict, m_m: dict):
+    _rcparams()
+
+    col_headers = ["Metric", "Baseline", "MA200 Filter"]
     rows = [
-        ["Final Value",      f"${m_baseline['final_cap']:,.0f}",         f"${m_spy['final_cap']:,.0f}"],
-        ["Total Return",     f"{m_baseline['total_ret']*100:+.2f}%",     f"{m_spy['total_ret']*100:+.2f}%"],
-        ["Ann. Return",      f"{m_baseline['ann_ret']*100:+.2f}%",       f"{m_spy['ann_ret']*100:+.2f}%"],
-        ["Volatility",       f"{m_baseline['vol']*100:.2f}%",            f"{m_spy['vol']*100:.2f}%"],
-        ["Sharpe Ratio",     f"{m_baseline['sharpe']:.2f}",              f"{m_spy['sharpe']:.2f}"],
-        ["Sortino Ratio",    f"{m_baseline['sortino']:.2f}",             f"{m_spy['sortino']:.2f}"],
-        ["Max Drawdown",     f"{m_baseline['max_dd']*100:.2f}%",         f"{m_spy['max_dd']*100:.2f}%"],
-        ["Win Rate",         f"{m_baseline['win_rate']*100:.1f}%",       "N/A"],
+        ["Final Value",   f"${m_b['final_cap']:,.0f}",     f"${m_m['final_cap']:,.0f}"],
+        ["Total Return",  f"{m_b['total_ret']*100:+.2f}%", f"{m_m['total_ret']*100:+.2f}%"],
+        ["Ann. Return",   f"{m_b['ann_ret']*100:+.2f}%",   f"{m_m['ann_ret']*100:+.2f}%"],
+        ["Volatility",    f"{m_b['vol']*100:.2f}%",        f"{m_m['vol']*100:.2f}%"],
+        ["Sharpe Ratio",  f"{m_b['sharpe']:.2f}",          f"{m_m['sharpe']:.2f}"],
+        ["Sortino Ratio", f"{m_b['sortino']:.2f}",         f"{m_m['sortino']:.2f}"],
+        ["Max Drawdown",  f"{m_b['max_dd']*100:.2f}%",     f"{m_m['max_dd']*100:.2f}%"],
+        ["Win Rate",      f"{m_b['win_rate']*100:.1f}%",   f"{m_m['win_rate']*100:.1f}%"],
     ]
 
-    tbl = ax3.table(
-        cellText=rows,
-        colLabels=col_headers,
-        cellLoc="center",
-        loc="center",
-        bbox=[0.05, 0.05, 0.90, 0.88],
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.axis("off")
+    fig.subplots_adjust(left=0.02, right=0.98, top=0.88, bottom=0.02)
+
+    tbl = ax.table(
+        cellText=rows, colLabels=col_headers,
+        cellLoc="center", loc="center",
+        bbox=[0.02, 0.02, 0.96, 0.90],
     )
     tbl.auto_set_font_size(False)
     tbl.set_fontsize(10)
@@ -347,7 +384,7 @@ def plot_comparison(baseline: dict, spy_bh: dict,
         cell.set_edgecolor("#CCCCCC")
         cell.set_linewidth(0.5)
         if r == 0:
-            cell.set_facecolor("#2C3E50")
+            cell.set_facecolor("#B00000")
             cell.set_text_props(color="white", fontweight="bold",
                                 ha="left" if c == 0 else "center", fontsize=9.5)
             cell.PAD = 0.06
@@ -357,22 +394,13 @@ def plot_comparison(baseline: dict, spy_bh: dict,
             if c == 0:
                 cell.PAD = 0.06
 
-    ax3.set_title("Panel C — Performance Summary",
-                  loc="left", fontsize=10, fontweight="bold", pad=8)
+    ax.set_title("Panel C — Performance Summary",
+                 loc="left", fontsize=10, fontweight="bold", pad=8)
 
-    # ── Main title ────────────────────────────────────────────────────────────
-    fig.suptitle(
-        "Overnight Effect — Baseline Strategy (CFD 10x) vs. SPY Buy & Hold",
-        fontsize=13, fontweight="bold", y=0.978
-    )
-    fig.text(0.5, 0.958,
-             "S&P 500 universe  |  TOP-10 CFDs  |  126-day momentum  |  10x leverage  |  no financing cost",
-             ha="center", fontsize=9, color="#555555", style="italic")
-
-    plt.savefig("backtest_baseline_vs_spy.png", dpi=200, bbox_inches="tight",
+    plt.savefig("ma200_fig3_table.png", dpi=200, bbox_inches="tight",
                 facecolor="white", edgecolor="none")
-    print("\n  Chart saved: backtest_baseline_vs_spy.png")
-    plt.show()
+    print("  Saved: ma200_fig3_table.png")
+    plt.close()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -381,7 +409,7 @@ def plot_comparison(baseline: dict, spy_bh: dict,
 
 if __name__ == "__main__":
     print("\n" + "="*62)
-    print("  BACKTEST: Overnight CFD 10x vs SPY Buy & Hold")
+    print("  BACKTEST: Baseline vs MA200 Trend Filter")
     print("="*62)
 
     print("\n[1/4] Fetching S&P 500 tickers...")
@@ -391,43 +419,38 @@ if __name__ == "__main__":
     print(f"  {len(tickers)} tickers loaded.")
 
     print("\n[2/4] Downloading OHLCV + SPY data...")
-    raw_data = yf.download(tickers, period=PERIOD, group_by="ticker",
-                           auto_adjust=True, progress=True, threads=True)
-    spy_df = fetch_spy(period="5y")
+    raw_data = yf.download(tickers, start=START_DATE, end=END_DATE,
+                           group_by="ticker", auto_adjust=True,
+                           progress=True, threads=True)
+    spy_df = fetch_spy(START_DATE, END_DATE)
 
     print("\n[3/4] Building clean data...")
     clean_data = build_clean_data(raw_data, tickers)
     print(f"  {len(clean_data)} tickers with valid data.")
 
-    print("\n[4/4] Running backtest...")
-    baseline = run_baseline(clean_data)
-    # ── Clip to competition window ────────────────────────────────────────────
-    if len(baseline["dates"]) > COMP_DAYS:
-        baseline = {
-            "dates":  baseline["dates"][-COMP_DAYS:],
-            "equity": baseline["equity"][-COMP_DAYS:],
-            "rets":   baseline["rets"][-COMP_DAYS:],
-        }
-        scale = CAPITAL_INIT / baseline["equity"][0]
-        baseline["equity"] = [e * scale for e in baseline["equity"]]
-    spy_bh   = build_spy_bh(spy_df, baseline["dates"])
+    print("\n[4/4] Running backtests...")
+    print("  → Baseline...")
+    baseline_raw = run_strategy(clean_data, spy_df, use_ma200=False)
+    baseline     = clip_to_eval(baseline_raw)
 
-    # SPY daily returns aligned to strategy dates
-    spy_rets = [b / a - 1 for a, b in zip(spy_bh["equity"][:-1], spy_bh["equity"][1:])]
-    spy_rets = [0.0] + spy_rets   # pad first day
+    print("  → MA200 Filter...")
+    ma200_raw = run_strategy(clean_data, spy_df, use_ma200=True)
+    ma200     = clip_to_eval(ma200_raw)
 
-    m_baseline = compute_metrics(baseline["equity"], baseline["rets"],  "Overnight Strategy CFD 10x")
-    m_spy      = compute_metrics(spy_bh["equity"],   spy_rets,           "SPY Buy & Hold")
+    m_baseline = compute_metrics(baseline["equity"], baseline["rets"],
+                                 "Baseline (no filter)", baseline["dates"])
+    m_ma200    = compute_metrics(ma200["equity"],    ma200["rets"],
+                                 "MA200 Trend Filter", ma200["dates"])
 
     print_metrics(m_baseline)
-    print_metrics(m_spy)
+    print_metrics(m_ma200)
 
     print(f"\n{'='*62}")
-    excess_sharpe = m_baseline["sharpe"] - m_spy["sharpe"]
-    excess_ret    = m_baseline["ann_ret"] - m_spy["ann_ret"]
-    print(f"  Excess Sharpe vs SPY:   {excess_sharpe:+.2f}")
-    print(f"  Excess Ann. Return:     {excess_ret*100:+.2f}%")
-    print(f"  Max DD reduction:       {(m_baseline['max_dd'] - m_spy['max_dd'])*100:+.2f}%")
+    print(f"  Sharpe improvement:   {m_ma200['sharpe'] - m_baseline['sharpe']:+.2f}")
+    print(f"  Ann. return delta:    {(m_ma200['ann_ret'] - m_baseline['ann_ret'])*100:+.2f}%")
+    print(f"  Max DD improvement:   {(m_ma200['max_dd'] - m_baseline['max_dd'])*100:+.2f}%")
     print(f"{'='*62}\n")
 
-    plot_comparison(baseline, spy_bh, m_baseline, m_spy)
+    plot_equity(baseline, ma200)
+    plot_drawdown(baseline, ma200)
+    plot_table(m_baseline, m_ma200)

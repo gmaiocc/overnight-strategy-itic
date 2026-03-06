@@ -5,10 +5,8 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-import yfinance as yf
-
 from SaxoOrderExecutor import SaxoOrderExecutor, ACCESS_TOKEN, BASE_URL
-from Risk_Management import validate_trade, update_daily_pnl, calculate_position_size
+from Risk_Management import validate_trade, update_daily_pnl
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STATUS_FILE = PROJECT_ROOT / "status.json"
@@ -52,18 +50,17 @@ def load_latest_signals() -> list:
     print(f"Loaded {len(tickers)} tickers: {tickers}")
     return tickers
 
-
 def should_run_signals() -> bool:
     now = now_london()
-    return now.hour == 19 and 15 <= now.minute < 20
+    return now.hour == 20 and 30 <= now.minute < 35
 
 def should_buy() -> bool:
     now = now_london()
-    return now.hour == 19 and now.minute >= 17
+    return now.hour == 20 and now.minute >= 55
 
 def should_sell() -> bool:
     now = now_london()
-    return now.hour == 19 and 20 <= now.minute < 35
+    return now.hour == 14 and 30 <= now.minute < 35
 
 
 if __name__ == "__main__":
@@ -81,7 +78,6 @@ if __name__ == "__main__":
     bought = False
     sold = False
     buy_prices = {}
-    buy_quantities = {}
     signals_generated = False
 
     write_status({"phase": "WAITING", "capital": CAPITAL, "bought": False,
@@ -101,42 +97,21 @@ if __name__ == "__main__":
         # 20:55 — comprar
         if should_buy() and not bought and tickers:
             print("=== BUY WINDOW ===")
-            position_usd = calculate_position_size(CAPITAL, num_positions=len(tickers))
-            print(f"Position size por stock: ${position_usd:,.2f}")
             successful = []
-
             for t in tickers:
-                try:
-                    # Obtém o preço actual para calcular a quantidade real
-                    price = float(yf.Ticker(t).history(period="1d")["Close"].iloc[-1])
-                    quantity = max(1, int(position_usd / price))
-
-                    # Valida com a quantidade real que vamos comprar
-                    if not validate_trade(t, quantity, CAPITAL):
-                        continue
-
-                    uic = executor.get_uic(t)
-                    if uic is None:
-                        continue
-
-                    print(f"  [{t}] preco ~${price:.2f} -> {quantity} accoes")
-                    result = executor.execute_order({
-                        "action": "BUY", "symbol": t, "uic": uic,
-                        "quantity": quantity, "asset_type": "Stock", "order_type": "Market"
-                    })
-                    print(f"BUY {t}: {result}")
-
-                    if result.get("success"):
-                        buy_prices[t] = uic
-                        buy_quantities[t] = quantity
-                        successful.append(t)
-
-                except Exception as e:
-                    print(f"Erro ao processar {t}: {e}")
-
+                if not validate_trade(t, 1, CAPITAL):
+                    continue
+                uic = executor.get_uic(t)
+                if uic is None:
+                    continue
+                result = executor.execute_order({"action": "BUY", "symbol": t, "uic": uic,
+                                                  "quantity": 1, "asset_type": "Stock", "order_type": "Market"})
+                print(f"BUY {t}: {result}")
+                if result.get("success"):
+                    buy_prices[t] = uic
+                    successful.append(t)
                 time.sleep(0.5)
-
-            bought = True  # impede re-execucao no proximo ciclo de 30s
+            bought = True
             write_status({"phase": "HOLDING", "capital": CAPITAL, "bought": True,
                           "sold": False, "positions": successful, "pnl_today": 0, "signals": tickers})
 
@@ -144,12 +119,9 @@ if __name__ == "__main__":
         if should_sell() and not sold and buy_prices:
             print("=== SELL WINDOW ===")
             for symbol, uic in buy_prices.items():
-                quantity = buy_quantities.get(symbol, 1)
-                result = executor.execute_order({
-                    "action": "SELL", "symbol": symbol, "uic": uic,
-                    "quantity": quantity, "asset_type": "Stock", "order_type": "Market"
-                })
-                print(f"SELL {symbol} x{quantity}: {result}")
+                result = executor.execute_order({"action": "SELL", "symbol": symbol, "uic": uic,
+                                                  "quantity": 1, "asset_type": "Stock", "order_type": "Market"})
+                print(f"SELL {symbol}: {result}")
                 time.sleep(0.5)
 
             CAPITAL_END = executor.get_balance()["data"]["TotalValue"]
@@ -158,12 +130,11 @@ if __name__ == "__main__":
             append_pnl_history(str(now_london().date()), daily_pnl, CAPITAL, CAPITAL_END)
             print(f"Day P&L: ${daily_pnl:,.2f}")
 
-            sold = True  # impede re-execucao caso o break falhe
             write_status({"phase": "DONE", "capital": CAPITAL_END, "bought": True,
                           "sold": True, "positions": [], "pnl_today": round(daily_pnl, 2), "signals": tickers})
             break
 
-        # Atualizar P&L em tempo real enquanto esta em holding
+        # atualizar P&L em tempo real enquanto está em holding
         if bought and not sold:
             live_capital = executor.get_balance()["data"]["TotalValue"]
             write_status({"phase": "HOLDING", "capital": CAPITAL, "bought": True, "sold": False,
