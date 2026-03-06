@@ -53,11 +53,11 @@ print(f'Universe after liquidity filter: {len(universe)} tickers')
 # Signal generator
 signals = []
 for ticker, df in universe.items():
-    if len(df) < 130:
+    if len(df) < 130:    # ensure that there are 126 days of data + small buffer
         continue
     df = df.sort_index()  # ensure chronological order before shift
     df['overnight_return'] = (df['open'] / df['close'].shift(1)) - 1
-    cum_overnight = (1 + df['overnight_return']).tail(126).prod() - 1
+    cum_overnight = (1 + df['overnight_return']).tail(126).prod() - 1    #calculate the overnight momentum of the stocks over 126 days, without rolling window
     signals.append({'ticker': ticker, 'cum_overnight_126d': cum_overnight})
 
 if not signals:
