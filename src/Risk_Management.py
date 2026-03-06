@@ -200,8 +200,8 @@ def validate_trade(symbol: str, quantity: int, capital: float) -> bool:
         )
         return False
 
-    # --- 4. Average daily volume check (in USD) ---
-    avg_volume = hist["Volume"].mean()
+    # --- 4. Average daily volume check (in USD) ---    (the volume check is already done in signal_generator.py with passes_liquidity() and with a better method 
+    avg_volume = hist["Volume"].mean()                
     avg_price = hist["Close"].mean()
     avg_volume_usd = avg_volume * avg_price
 
