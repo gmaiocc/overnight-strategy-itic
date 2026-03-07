@@ -79,19 +79,6 @@ Only one leg is active at any given time.
 | Sortino Ratio | 2.38 | 3.52 |
 | Max Drawdown | -24.86% | -10.62% |
 
-## Proposed Risk Management Framework
-
-A risk management module was designed for live deployment but is not applied in the backtest simulations. The proposed rules are documented in the paper and include:
-
-| Rule | Value |
-|------|-------|
-| Max position size | 10% of capital per stock |
-| Max simultaneous positions | 10 |
-| Min market cap | $2B |
-| Min avg daily volume | $10M |
-| Daily loss limit | -2% of capital → 24h trading halt |
-| Earnings filter | Skip stocks reporting earnings next day |
-
 ## Setup
 
 ```bash
