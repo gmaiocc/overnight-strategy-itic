@@ -25,7 +25,7 @@ MAX_POSITIONS = 10  # Max simultaneous positions
 MIN_MARKET_CAP = 2e9  # $2B minimum market cap
 MIN_DAILY_VOLUME_USD = 10e6  # $10M average daily volume
 MAX_BID_ASK_SPREAD_PCT = 0.001  # 0.1% max spread
-MAX_DAILY_LOSS_PCT = 0.02  # -2% of capital triggers halt
+MAX_DAILY_LOSS_PCT = 0.01  # -1% of capital triggers halt
 HALT_DURATION_HOURS = 24
 
 # File for persistence across script runs
