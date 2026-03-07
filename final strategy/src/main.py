@@ -59,11 +59,11 @@ def should_run_signals() -> bool:
 
 def should_buy() -> bool:
     now = now_london()
-    return now.hour == 19 and now.minute >= 17
+    return now.hour == 20 and now.minute >= 50
 
 def should_sell() -> bool:
     now = now_london()
-    return now.hour == 19 and 20 <= now.minute < 35
+    return now.hour == 14 and 20 <= now.minute < 35
 
 
 if __name__ == "__main__":
