@@ -10,9 +10,8 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 ACCESS_TOKEN = os.getenv("SAXO_ACCESS_TOKEN")
 BASE_URL     = os.getenv("SAXO_BASE_URL")
-
 MAX_RETRIES = 3
-RETRY_DELAY = 2  # seconds
+RETRY_DELAY = 2
 
 
 class SaxoOrderExecutor:

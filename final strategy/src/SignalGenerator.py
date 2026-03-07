@@ -1,51 +1,21 @@
-"""
-signal_generator.py — Overnight Momentum Signal Generation
-===========================================================
-Implements the MA50 Long/Short Regime strategy as backtested:
-
-  SPY > MA50  →  LONG  regime: select TOP-10  by 126d overnight momentum (BUY)
-  SPY ≤ MA50  →  SHORT regime: select BOTTOM-10 by 126d overnight momentum (SELL_SHORT)
-
-Only one leg is active per day. The regime is determined once at signal
-generation time and locked into the signals JSON for the execution engine.
-
-Overnight return formula (Lou et al., 2019):
-    r_ov,t = (Open_t / Close_{t-1}) - 1
-
-Signal: cumulative product over a 126-day rolling window.
-
-References:
-    Lou, D., Polk, C., & Skouras, S. (2019). A tug of war: Overnight versus
-    intraday expected returns. Journal of Financial Economics, 134(2), 192-213.
-"""
-
 import json
-import os
+import math
 import pandas as pd
 import yfinance as yf
 import requests
 from datetime import date, datetime
 from pathlib import Path
 
-
-# ─── CONFIGURATION ────────────────────────────────────────────────────────────
-PERIOD          = "1y"          # Historical window for OHLCV download
-MOMENTUM_WINDOW = 126           # Trading days (~6 months) — per Lou et al. (2019)
-MIN_DV          = 10_000_000    # $10M minimum 20-day average daily dollar volume
-MA50_WINDOW     = 50            # Days for SPY moving average regime filter
-LONG_N          = 10            # Number of long positions (bull regime)
-SHORT_N         = 10            # Number of short positions (bear regime)
-OUTPUT_DIR      = Path(__file__).resolve().parent.parent / "signals"  # [*] absolute path, not CWD-relative
-# ─────────────────────────────────────────────────────────────────────────────
+PERIOD = "1y"
+MOMENTUM_WINDOW = 126
+MIN_DV = 10_000_000
+MA50_WINDOW = 50
+LONG_N = 10
+SHORT_N = 10
+OUTPUT_DIR = Path(__file__).resolve().parent.parent / "signals"
 
 
 def get_sp500_tickers() -> list[str]:
-    """
-    Retrieve the current S&P 500 constituent list from Wikipedia.
-
-    Returns:
-        List of ticker strings with dots replaced by hyphens (e.g. 'BRK-B').
-    """
     headers = {"User-Agent": "Mozilla/5.0"}
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
     tables = pd.read_html(requests.get(url, headers=headers).content)
@@ -53,14 +23,6 @@ def get_sp500_tickers() -> list[str]:
 
 
 def fetch_spy_regime() -> tuple[str, float, float]:
-    """
-    Determine the current market regime by comparing SPY's last close
-    against its 50-day simple moving average.
-
-    Returns:
-        Tuple of (regime, spy_close, ma50) where regime is 'LONG' or 'SHORT'.
-        Defaults to 'LONG' if insufficient data is available.
-    """
     spy = yf.Ticker("SPY").history(period="1y", auto_adjust=True)
     spy.index = pd.to_datetime(spy.index).tz_localize(None).normalize()
     spy.index.name = "date"
@@ -81,20 +43,9 @@ def fetch_spy_regime() -> tuple[str, float, float]:
 
 
 def download_and_clean(tickers: list[str]) -> dict:
-    """
-    Bulk-download OHLCV data via yfinance and return a dict of
-    cleaned DataFrames keyed by ticker.
-
-    Cleaning steps:
-        - Deduplicate index (keep last)
-        - Drop rows with missing open or close
-        - Remove rows with non-positive prices or zero volume
-    """
+    
     print(f"Downloading {len(tickers)} tickers (period={PERIOD})...")
-    data = yf.download(
-        tickers, period=PERIOD, auto_adjust=True,
-        group_by="ticker", progress=True
-    )
+    data = yf.download(tickers, period=PERIOD, auto_adjust=True, group_by="ticker", progress=True)
 
     raw = {}
     for ticker in tickers:
@@ -116,13 +67,7 @@ def download_and_clean(tickers: list[str]) -> dict:
 
 
 def apply_liquidity_filter(raw: dict) -> dict:
-    """
-    Retain only stocks with a 20-day average daily dollar volume
-    (Close × Volume) at or above MIN_DV.
 
-    This ensures the portfolio can absorb institutional-sized orders
-    without significant market impact or slippage (see Section 3.1).
-    """
     universe = {
         ticker: df for ticker, df in raw.items()
         if (df["close"] * df["volume"]).tail(20).mean() >= MIN_DV
@@ -133,25 +78,14 @@ def apply_liquidity_filter(raw: dict) -> dict:
 
 
 def compute_momentum_signals(universe: dict) -> pd.DataFrame:
-    """
-    Compute 126-day cumulative overnight momentum for each eligible stock.
-
-    Formula (Lou et al., 2019):
-        r_ov,t  = (Open_t / Close_{t-1}) - 1
-        Momentum = prod(1 + r_ov) over last 126 days - 1
-
-    Returns:
-        DataFrame sorted descending by cum_overnight_126d.
-        Top rows = momentum winners (long candidates).
-        Bottom rows = momentum losers (short candidates).
-    """
+    
     signals = []
     for ticker, df in universe.items():
         if len(df) < MOMENTUM_WINDOW + 5:
             continue
         df = df.sort_index()
         df["overnight_return"] = (df["open"] / df["close"].shift(1)) - 1
-        df = df.dropna(subset=["overnight_return"])               # [+] drop NaN from first row (no Close_{t-1})
+        df = df.dropna(subset=["overnight_return"])
         if len(df) < MOMENTUM_WINDOW:
             continue
         cum_overnight = (1 + df["overnight_return"]).tail(MOMENTUM_WINDOW).prod() - 1
@@ -173,23 +107,9 @@ def compute_momentum_signals(universe: dict) -> pd.DataFrame:
 
 
 def run_signal_generation() -> dict:
-    """
-    Execute the full signal generation pipeline and persist results.
 
-    Pipeline:
-        1. Fetch S&P 500 constituents
-        2. Determine market regime (SPY vs MA50)
-        3. Download & clean OHLCV data
-        4. Apply liquidity filter
-        5. Compute 126-day overnight momentum
-        6. Select TOP-10 (LONG) or BOTTOM-10 (SHORT) based on regime
-        7. Serialise to signals/signals_YYYYMMDD_HHMM.json
-
-    Returns:
-        Dict with keys: date, regime, spy_close, ma50, action, stocks.
-    """
     print("=" * 60)
-    print("  SIGNAL GENERATION — MA50 Long/Short Overnight Strategy")
+    print("SIGNAL GENERATION — MA50 Long/Short Overnight Strategy")
     print("=" * 60)
 
     # Step 1 — Universe
@@ -215,16 +135,13 @@ def run_signal_generation() -> dict:
 
     # Step 6 — Select stocks based on regime
     if regime == "LONG":
-        # Bull regime: long top-N overnight momentum winners
-        # Thesis: institutional selling at close depresses prices →
-        #         retail buying at open drives them up
         selected = signals_df.head(LONG_N)["ticker"].tolist()
         action = "BUY"
         label = f"TOP-{LONG_N} momentum winners (LONG)"
     else:
-        # Bear regime: short bottom-N overnight momentum losers
-        # Thesis: overnight discount on weakest stocks in bear regime
-        selected = signals_df.tail(SHORT_N)["ticker"].tolist()
+        selected = (
+            signals_df.sort_values("cum_overnight_126d", ascending=True).head(SHORT_N)["ticker"].tolist()
+        )
         action = "SELL_SHORT"
         label = f"BOTTOM-{SHORT_N} momentum losers (SHORT)"
 
@@ -237,12 +154,13 @@ def run_signal_generation() -> dict:
     OUTPUT_DIR.mkdir(exist_ok=True)
     filename = OUTPUT_DIR / f"signals_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
     output = {
-        "date":      str(date.today()),
-        "regime":    regime,
+        "date": str(date.today()),
+        "regime": regime,
         "spy_close": round(spy_close, 4),
-        "ma50":      round(ma50, 4) if not pd.isna(ma50) else None,
-        "action":    action,
-        "stocks":    selected,
+
+        "ma50": round(ma50, 4) if not math.isnan(ma50) else None,
+        "action": action,
+        "stocks": selected,
     }
     with open(filename, "w") as f:
         json.dump(output, f, indent=2)
