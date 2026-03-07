@@ -3,10 +3,9 @@ import logging
 import os
 from datetime import datetime, timedelta, date
 from pathlib import Path
+from Validations import TradeValidator
 
-import pandas as pd
-import yfinance as yf
-import numpy as np
+_validator = TradeValidator() # create instance of new class TradeValidator
 
 # Logging Setup
 logging.basicConfig(
@@ -25,7 +24,7 @@ MAX_POSITIONS = 10  # Max simultaneous positions
 MIN_MARKET_CAP = 2e9  # $2B minimum market cap
 MIN_DAILY_VOLUME_USD = 10e6  # $10M average daily volume
 MAX_BID_ASK_SPREAD_PCT = 0.001  # 0.1% max spread
-MAX_DAILY_LOSS_PCT = 0.01  # -1% of capital triggers halt
+MAX_DAILY_LOSS_PCT = 0.02  # -2% of capital triggers halt
 HALT_DURATION_HOURS = 24
 
 # File for persistence across script runs
@@ -84,6 +83,20 @@ def calculate_position_size(capital: float, num_positions: int = None) -> float:
     logger.info(f"Position size: ${position_size:,.2f} ({MAX_POSITION_PCT * 100}% of ${capital:,.2f})")
     return position_size
 
+def calculate_position_lot_size(capital: float, price: float) -> int:
+    """
+    Calculate the number of shares to buy for a position based on capital and price.
+
+    Args:
+        capital: Total portfolio capital in USD
+        price: Current price of the stock
+    Returns:
+        Number of shares to buy (rounded down to nearest whole share)
+    """
+    position_size = calculate_position_size(capital)
+    lot_size = int(position_size // price)  # Round down to whole shares
+    logger.info(f"Calculated lot size: {lot_size} shares at ${price:.2f} for position size ${position_size:,.2f}")
+    return lot_size
 
 def check_daily_loss_limit(capital: float = None) -> bool:
     """
@@ -139,118 +152,12 @@ def update_daily_pnl(pnl_change: float):
     _save_state(state)
     logger.info(f"Daily P&L updated: ${state['daily_pnl']:,.2f}")
 
-
 def validate_trade(symbol: str, quantity: int, capital: float) -> bool:
-    """
-    Validate whether a trade passes all risk checks.
-
-    Checks:
-        1. Trading not halted (daily loss limit)
-        2. Position size within limits
-        3. Minimum market cap
-        4. Minimum average daily volume
-        5. No upcoming earnings announcement
-
-    Args:
-        symbol: Stock ticker (e.g. 'AAPL')
-        quantity: Number of shares to buy
-        capital: Total portfolio capital in USD
-
-    Returns:
-        True if trade is allowed, False otherwise
-    """
-    logger.info(f"Validating trade: {symbol} x{quantity}")
-
-    # --- 1. Check if trading is halted ---
-    if not check_daily_loss_limit(capital):
-        logger.warning(f"[{symbol}] REJECTED: Trading is halted.")
-        return False
-
-    # --- Fetch stock data ---
-    try:
-        ticker = yf.Ticker(symbol)
-        info = ticker.info
-        hist = ticker.history(period="30d")
-    except Exception as e:
-        logger.error(f"[{symbol}] REJECTED: Failed to fetch data — {e}")
-        return False
-
-    if hist.empty:
-        logger.warning(f"[{symbol}] REJECTED: No historical data available.")
-        return False
-
-    # --- 2. Position size check ---
-    current_price = hist["Close"].iloc[-1]
-    trade_value = quantity * current_price
-    max_allowed = capital * MAX_POSITION_PCT
-
-    if trade_value > max_allowed:
-        logger.warning(
-            f"[{symbol}] REJECTED: Trade value ${trade_value:,.2f} exceeds "
-            f"max allowed ${max_allowed:,.2f} ({MAX_POSITION_PCT * 100}% of capital)."
-        )
-        return False
-
-    # --- 3. Market cap check ---
-    market_cap = info.get("marketCap", 0)
-    if market_cap < MIN_MARKET_CAP:
-        logger.warning(
-            f"[{symbol}] REJECTED: Market cap ${market_cap / 1e9:.2f}B < "
-            f"minimum ${MIN_MARKET_CAP / 1e9:.0f}B."
-        )
-        return False
-
-    # --- 4. Average daily volume check (in USD) ---    (the volume check is already done in signal_generator.py with passes_liquidity() and with a better method 
-    avg_volume = hist["Volume"].mean()                
-    avg_price = hist["Close"].mean()
-    avg_volume_usd = avg_volume * avg_price
-
-    if avg_volume_usd < MIN_DAILY_VOLUME_USD:
-        logger.warning(
-            f"[{symbol}] REJECTED: Avg daily volume ${avg_volume_usd / 1e6:.1f}M < "
-            f"minimum ${MIN_DAILY_VOLUME_USD / 1e6:.0f}M."
-        )
-        return False
-
-    # --- 5. Earnings announcement check ---
-    if _has_upcoming_earnings(ticker):
-        logger.warning(f"[{symbol}] REJECTED: Earnings announcement tomorrow — gap risk.")
-        return False
-
-    logger.info(f"[{symbol}] APPROVED: All risk checks passed.")
-    return True
-
-
-def _has_upcoming_earnings(ticker: yf.Ticker) -> bool:
-    """
-    Check if the stock has an earnings announcement tomorrow.
-    Returns True if earnings are upcoming (risky), False if clear.
-    """
-    try:
-        calendar = ticker.calendar
-        if calendar is None or calendar.empty:
-            return False
-
-        # calendar columns are dates, rows are metrics
-        # Earnings Date is typically in columns
-        if "Earnings Date" in calendar.index:
-            earnings_dates = calendar.loc["Earnings Date"]
-        elif hasattr(calendar, "columns"):
-            # Some versions return it differently
-            earnings_dates = pd.Series(calendar.columns)
-        else:
-            return False
-
-        tomorrow = date.today() + timedelta(days=1)
-        for ed in pd.to_datetime(earnings_dates, errors="coerce"):
-            if pd.notna(ed) and ed.date() == tomorrow:
-                return True
-
-    except Exception as e:
-        logger.debug(f"Could not fetch earnings calendar: {e}")
-
-    return False
-
+    """Wrapper for backward compatibility"""
+    is_valid, message = _validator.validate_trade(symbol, quantity, capital, MAX_POSITION_PCT)
+    if not is_valid:
+        logger.warning(f"[{symbol}] REJECTED: {message}")
+    return is_valid
 
 # ─────────────────────────────────────────────
 # DASHBOARD / REPORTING
