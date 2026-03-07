@@ -1,16 +1,3 @@
-"""
-Backtest: Day & Night Strategy — Baseline vs MA50 Long/Short Regime
-Compares the unfiltered baseline (TOP-10 long / 126d) against a regime-based
-long/short extension conditioned on SPY vs its 50-day moving average:
-
-  SPY > MA50  →  LONG  TOP-5  stocks by 126d overnight momentum
-  SPY < MA50  →  SHORT BOTTOM-5 stocks by 126d overnight momentum
-
-Only one leg is active at a time — the regime determines direction.
-
-Evaluation period: March 2024 – March 2026 (~2 years).
-"""
-
 import datetime
 import pandas as pd
 import yfinance as yf
@@ -22,20 +9,18 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-# ─── CONFIG ───────────────────────────────────────────────────────────────────
-START_DATE       = "2023-01-01"
-END_DATE         = "2026-03-06"
-MOMENTUM_WINDOW  = 126
-LONG_N           = 10
-SHORT_N          = 10
-MA50_WINDOW      = 50
-RISK_FREE_RATE   = 0.0
-CAPITAL_INIT     = 10_000.0
-MIN_DOLLAR_VOL   = 10_000_000
+START_DATE = "2023-01-01"
+END_DATE = "2026-03-06"
+MOMENTUM_WINDOW = 126
+LONG_N = 10
+SHORT_N = 10
+MA50_WINDOW = 50
+RISK_FREE_RATE = 0.0
+CAPITAL_INIT = 10_000.0
+MIN_DOLLAR_VOL = 10_000_000
 TRANSACTION_COST = 0.0
-QUICK_MODE       = False
-EVAL_START       = datetime.datetime(2024, 3, 1)
-# ─────────────────────────────────────────────────────────────────────────────
+QUICK_MODE = False
+EVAL_START = datetime.datetime(2024, 3, 1)
 
 
 def get_sp500_tickers() -> list:
@@ -49,7 +34,7 @@ def get_sp500_tickers() -> list:
 
 
 def fetch_spy_ma50(start: str, end: str) -> pd.DataFrame:
-    print("  Downloading SPY (MA50)...")
+    print("Downloading SPY (MA50)...")
     spy = yf.Ticker("SPY").history(start=start, end=end, auto_adjust=True)
     spy.index = pd.to_datetime(spy.index).tz_localize(None).normalize()
     spy.index.name = "date"
@@ -57,7 +42,7 @@ def fetch_spy_ma50(start: str, end: str) -> pd.DataFrame:
     spy["MA50"] = spy["Close"].rolling(MA50_WINDOW).mean()
     above = (spy["Close"] > spy["MA50"]).sum()
     below = (spy["Close"] <= spy["MA50"]).sum()
-    print(f"  SPY above MA50: {above}d | below: {below}d")
+    print(f"SPY above MA50: {above}d | below: {below}d")
     return spy[["Close", "MA50"]]
 
 
@@ -127,7 +112,7 @@ def run_longshort(clean_data: dict, spy_df: pd.DataFrame) -> dict:
     """
     Regime-based:
       SPY > MA50  -> LONG  TOP-5  by momentum  (overnight premium)
-      SPY <= MA50 -> SHORT BOTTOM-5 by momentum (overnight discount/reversal)
+      SPY <= MA50 -> SHORT BOTTOM-5 by momentum (overnight discount)
     """
     all_dates = sorted(set().union(*[set(df.index) for df in clean_data.values()]))
     all_dates = [d for d in all_dates if isinstance(d, pd.Timestamp)]
@@ -146,7 +131,7 @@ def run_longshort(clean_data: dict, spy_df: pd.DataFrame) -> dict:
             stat["cash"] += 1
             continue
 
-        spy_row    = spy_past.iloc[-1]
+        spy_row = spy_past.iloc[-1]
         above_ma50 = spy_row["Close"] > spy_row["MA50"]
 
         candidates = []
@@ -168,12 +153,12 @@ def run_longshort(clean_data: dict, spy_df: pd.DataFrame) -> dict:
         candidates.sort(key=lambda x: x["momentum"], reverse=True)
 
         if above_ma50:
-            # LONG top-10: profit from overnight premium in bull regime
+            # LONG top-10
             leg = candidates[:LONG_N]
             ret = np.mean([x["return"] for x in leg])
             stat["long"] += 1
         else:
-            # SHORT bottom-10: profit from overnight discount/reversal in bear regime
+            # SHORT bottom-10
             leg = candidates[-SHORT_N:]
             ret = np.mean([-x["return"] for x in leg])
             stat["short"] += 1
@@ -184,7 +169,7 @@ def run_longshort(clean_data: dict, spy_df: pd.DataFrame) -> dict:
 
     total = sum(stat.values())
     if total > 0:
-        print(f"  long={stat['long']}d ({stat['long']/total*100:.0f}%) | "
+        print(f"long={stat['long']}d ({stat['long']/total*100:.0f}%) | "
               f"short={stat['short']}d ({stat['short']/total*100:.0f}%) | "
               f"cash={stat['cash']}d ({stat['cash']/total*100:.0f}%)")
 
@@ -210,10 +195,10 @@ def compute_metrics(equity, daily_rets, label, dates=None):
         years = (dates[-1] - dates[0]).days / 365.25
     else:
         years = n_days / 252
-    ann_ret  = (1 + total_ret) ** (1 / years) - 1 if years > 0 else 0
-    vol      = np.std(daily_rets) * np.sqrt(252) if daily_rets else 0
-    sharpe   = (ann_ret - RISK_FREE_RATE) / vol if vol > 0 else 0
-    neg      = [r for r in daily_rets if r < 0]
+    ann_ret = (1 + total_ret) ** (1 / years) - 1 if years > 0 else 0
+    vol = np.std(daily_rets) * np.sqrt(252) if daily_rets else 0
+    sharpe = (ann_ret - RISK_FREE_RATE) / vol if vol > 0 else 0
+    neg = [r for r in daily_rets if r < 0]
     down_vol = np.std(neg) * np.sqrt(252) if neg else 0
     sortino  = (ann_ret - RISK_FREE_RATE) / down_vol if down_vol > 0 else 0
     peak = equity[0]; max_dd = 0.0
@@ -240,9 +225,9 @@ def print_metrics(m):
 
 
 COLOR_BASELINE = "#2CA02C"
-COLOR_LS       = "#1F77B4"
-COLOR_DD_BASE  = "#D62728"
-COLOR_DD_LS    = "#1F77B4"
+COLOR_LS = "#1F77B4"
+COLOR_DD_BASE = "#D62728"
+COLOR_DD_LS = "#1F77B4"
 
 
 def _rcparams():
@@ -261,8 +246,8 @@ def _rcparams():
 def plot_equity(baseline, ls):
     _rcparams()
     start_date = baseline["dates"][0]
-    end_date   = baseline["dates"][-1]
-    start_6m   = end_date - datetime.timedelta(days=182)
+    end_date = baseline["dates"][-1]
+    start_6m = end_date - datetime.timedelta(days=182)
 
     def clip(res, x0, x1):
         pts = [(d, e) for d, e in zip(res["dates"], res["equity"]) if x0 <= d <= x1]
@@ -273,11 +258,9 @@ def plot_equity(baseline, ls):
         ds_b, es_b = clip(baseline, x0, x1)
         ds_l, es_l = clip(ls, x0, x1)
         if ds_b:
-            ax.plot(ds_b, es_b, label="Baseline (Long-Only TOP-10)",
-                    color=COLOR_BASELINE, linewidth=1.8)
+            ax.plot(ds_b, es_b, label="Baseline (Long-Only TOP-10)", color=COLOR_BASELINE, linewidth=1.8)
         if ds_l:
-            ax.plot(ds_l, es_l, label="L/S Regime (TOP-10↑ SPY>MA50 / BOTTOM-10↓ SPY<MA50)",
-                    color=COLOR_LS, linewidth=1.8, linestyle="--")
+            ax.plot(ds_l, es_l, label="L/S Regime (TOP-10↑ SPY>MA50 / BOTTOM-10↓ SPY<MA50)", color=COLOR_LS, linewidth=1.8, linestyle="--")
         ax.axhline(CAPITAL_INIT, color="#BBBBBB", linewidth=0.7, linestyle=":", zorder=0)
         ax.set_title(title, loc="left", fontsize=10, fontweight="bold", pad=6)
         if show_ylabel: ax.set_ylabel("Portfolio Value (USD)", labelpad=6)
@@ -291,14 +274,12 @@ def plot_equity(baseline, ls):
     fig, (ax1a, ax1b) = plt.subplots(1, 2, figsize=(14, 5.5), gridspec_kw={"wspace": 0.12})
     fig.subplots_adjust(left=0.07, right=0.97, top=0.88, bottom=0.12)
 
-    _panel(ax1a, start_date, end_date, "Panel A — Full Period (Mar 2024 – Mar 2026)",
-           show_ylabel=True, show_legend=True)
+    _panel(ax1a, start_date, end_date, "Panel A — Full Period (Mar 2024 – Mar 2026)", show_ylabel=True, show_legend=True)
     ax1a.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
     full_vals = [v for v in baseline["equity"] + ls["equity"] if not np.isnan(v)]
     ax1a.set_ylim(min(full_vals) * 0.97, max(full_vals) * 1.03)
 
-    _panel(ax1b, start_6m, end_date, "Panel A — Last 6 Months (Zoom)",
-           show_ylabel=False, show_legend=False)
+    _panel(ax1b, start_6m, end_date, "Panel A — Last 6 Months (Zoom)", show_ylabel=False, show_legend=False)
     ax1b.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
     zoom_vals  = [e for d, e in zip(baseline["dates"], baseline["equity"]) if d >= start_6m]
     zoom_vals += [e for d, e in zip(ls["dates"], ls["equity"]) if d >= start_6m]
@@ -306,19 +287,16 @@ def plot_equity(baseline, ls):
     ax1b.set_ylim(min(zoom_vals) * 0.98, max(zoom_vals) * 1.02)
     ax1b.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"${x:,.0f}"))
 
-    fig.suptitle("Overnight Effect — Baseline vs. MA50 Long/Short Regime",
-                 fontsize=13, fontweight="bold")
-
-    plt.savefig("ls_fig1_equity.png", dpi=200, bbox_inches="tight",
-                facecolor="white", edgecolor="none")
-    print("  Saved: ls_fig1_equity.png")
+    fig.suptitle("Overnight Effect — Baseline vs. MA50 Long/Short Regime", fontsize=13, fontweight="bold")
+    plt.savefig("ls_fig1_equity.png", dpi=200, bbox_inches="tight", facecolor="white", edgecolor="none")
+    print("Saved: ls_fig1_equity.png")
     plt.close()
 
 
 def plot_drawdown(baseline, ls):
     _rcparams()
     start_date = baseline["dates"][0]
-    end_date   = baseline["dates"][-1]
+    end_date = baseline["dates"][-1]
 
     def calc_dd(equity):
         peak, out = equity[0], []
@@ -334,16 +312,13 @@ def plot_drawdown(baseline, ls):
     fig.subplots_adjust(left=0.07, right=0.97, top=0.85, bottom=0.14)
 
     ax.fill_between(baseline["dates"], dd_b, 0, alpha=0.20, color=COLOR_DD_BASE, zorder=1)
-    ax.fill_between(ls["dates"],       dd_l, 0, alpha=0.20, color=COLOR_DD_LS,   zorder=0)
-    ax.plot(baseline["dates"], dd_b, color=COLOR_DD_BASE, linewidth=1.6,
-            label="Baseline (Long-Only TOP-10)")
-    ax.plot(ls["dates"],       dd_l, color=COLOR_DD_LS,   linewidth=1.6,
-            linestyle="--", label="L/S Regime (TOP-10 / BOTTOM-10)")
+    ax.fill_between(ls["dates"], dd_l, 0, alpha=0.20, color=COLOR_DD_LS, zorder=0)
+    ax.plot(baseline["dates"], dd_b, color=COLOR_DD_BASE, linewidth=1.6, label="Baseline (Long-Only TOP-10)")
+    ax.plot(ls["dates"], dd_l, color=COLOR_DD_LS, linewidth=1.6, linestyle="--", label="L/S Regime (TOP-10 / BOTTOM-10)")
 
     ax.axhline(0, color="#AAAAAA", linewidth=0.7, linestyle=":", zorder=0)
     ax.set_ylabel("Drawdown (%)", labelpad=6)
-    ax.set_title("Panel B — Drawdown from Peak (Mar 2024 – Mar 2026)",
-                 loc="left", fontsize=10, fontweight="bold", pad=6)
+    ax.set_title("Panel B — Drawdown from Peak (Mar 2024 – Mar 2026)", loc="left", fontsize=10, fontweight="bold", pad=6)
     ax.legend(loc="lower left")
     ax.grid(True, axis="y")
     ax.set_xlim(start_date, end_date)
@@ -351,9 +326,8 @@ def plot_drawdown(baseline, ls):
     ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
     ax.tick_params(axis="x", rotation=30)
 
-    plt.savefig("ls_fig2_drawdown.png", dpi=200, bbox_inches="tight",
-                facecolor="white", edgecolor="none")
-    print("  Saved: ls_fig2_drawdown.png")
+    plt.savefig("ls_fig2_drawdown.png", dpi=200, bbox_inches="tight", facecolor="white", edgecolor="none")
+    print("Saved: ls_fig2_drawdown.png")
     plt.close()
 
 
@@ -375,8 +349,7 @@ def plot_table(m_b, m_l):
     ax.axis("off")
     fig.subplots_adjust(left=0.02, right=0.98, top=0.88, bottom=0.02)
 
-    tbl = ax.table(cellText=rows, colLabels=col_headers,
-                   cellLoc="center", loc="center", bbox=[0.02, 0.02, 0.96, 0.90])
+    tbl = ax.table(cellText=rows, colLabels=col_headers, cellLoc="center", loc="center", bbox=[0.02, 0.02, 0.96, 0.90])
     tbl.auto_set_font_size(False)
     tbl.set_fontsize(10)
 
@@ -386,63 +359,56 @@ def plot_table(m_b, m_l):
         cell.set_edgecolor("#CCCCCC"); cell.set_linewidth(0.5)
         if r == 0:
             cell.set_facecolor("#B00000")
-            cell.set_text_props(color="white", fontweight="bold",
-                                ha="left" if c == 0 else "center", fontsize=9.5)
+            cell.set_text_props(color="white", fontweight="bold", ha="left" if c == 0 else "center", fontsize=9.5)
             cell.PAD = 0.06
         else:
             cell.set_facecolor("#F7F9FC" if r % 2 == 0 else "#FFFFFF")
             cell.set_text_props(ha="left" if c == 0 else "center", fontsize=10)
             if c == 0: cell.PAD = 0.06
 
-    ax.set_title("Panel C — Performance Summary",
-                 loc="left", fontsize=10, fontweight="bold", pad=8)
+    ax.set_title("Panel C — Performance Summary", loc="left", fontsize=10, fontweight="bold", pad=8)
 
-    plt.savefig("ls_fig3_table.png", dpi=200, bbox_inches="tight",
-                facecolor="white", edgecolor="none")
-    print("  Saved: ls_fig3_table.png")
+    plt.savefig("ls_fig3_table.png", dpi=200, bbox_inches="tight", facecolor="white", edgecolor="none")
+    print("Saved: ls_fig3_table.png")
     plt.close()
 
 
 if __name__ == "__main__":
     print("\n" + "="*62)
-    print("  BACKTEST: Baseline vs MA50 Long/Short Regime")
+    print("BACKTEST: Baseline vs MA50 Long/Short Regime")
     print("="*62)
 
     print("\n[1/3] Fetching S&P 500 tickers...")
     tickers = get_sp500_tickers()
     if QUICK_MODE: tickers = tickers[:80]
-    print(f"  {len(tickers)} tickers loaded.")
+    print(f"{len(tickers)} tickers loaded.")
 
     print("\n[2/3] Downloading OHLCV + SPY data...")
-    raw_data = yf.download(tickers, start=START_DATE, end=END_DATE,
-                           group_by="ticker", auto_adjust=True,
-                           progress=True, threads=True)
+    raw_data = yf.download(tickers, start=START_DATE, end=END_DATE, group_by="ticker", auto_adjust=True, progress=True, threads=True)
     spy_df = fetch_spy_ma50(START_DATE, END_DATE)
 
     print("\n[3/3] Building clean data & running backtests...")
     clean_data = build_clean_data(raw_data, tickers)
-    print(f"  {len(clean_data)} tickers with valid data.")
+    print(f"{len(clean_data)} tickers with valid data.")
 
-    print("  → Baseline (TOP-10 long only)...")
+    print("→ Baseline (TOP-10 long only)...")
     baseline_raw = run_baseline(clean_data)
-    baseline     = clip_to_eval(baseline_raw)
+    baseline = clip_to_eval(baseline_raw)
 
-    print("  → MA50 Long/Short Regime...")
+    print("→ MA50 Long/Short Regime...")
     ls_raw = run_longshort(clean_data, spy_df)
-    ls     = clip_to_eval(ls_raw)
+    ls = clip_to_eval(ls_raw)
 
-    m_baseline = compute_metrics(baseline["equity"], baseline["rets"],
-                                 "Baseline (Long-Only TOP-10)", baseline["dates"])
-    m_ls       = compute_metrics(ls["equity"], ls["rets"],
-                                 "MA50 Long/Short Regime", ls["dates"])
+    m_baseline = compute_metrics(baseline["equity"], baseline["rets"], "Baseline (Long-Only TOP-10)", baseline["dates"])
+    m_ls = compute_metrics(ls["equity"], ls["rets"], "MA50 Long/Short Regime", ls["dates"])
 
     print_metrics(m_baseline)
     print_metrics(m_ls)
 
     print(f"\n{'='*62}")
-    print(f"  Sharpe improvement:   {m_ls['sharpe'] - m_baseline['sharpe']:+.2f}")
-    print(f"  Ann. return delta:    {(m_ls['ann_ret'] - m_baseline['ann_ret'])*100:+.2f}%")
-    print(f"  Max DD improvement:   {(m_ls['max_dd'] - m_baseline['max_dd'])*100:+.2f}%")
+    print(f"Sharpe improvement: {m_ls['sharpe'] - m_baseline['sharpe']:+.2f}")
+    print(f"Ann. return delta: {(m_ls['ann_ret'] - m_baseline['ann_ret'])*100:+.2f}%")
+    print(f"Max DD improvement: {(m_ls['max_dd'] - m_baseline['max_dd'])*100:+.2f}%")
     print(f"{'='*62}\n")
 
     plot_equity(baseline, ls)

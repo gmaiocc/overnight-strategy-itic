@@ -147,7 +147,7 @@ if __name__ == "__main__":
                     "action": "SELL", "symbol": symbol, "uic": uic,
                     "quantity": quantity, "asset_type": "Stock", "order_type": "Market"
                 })
-                print(f"  SELL {symbol} x{quantity}: {result}")
+                print(f"SELL {symbol} x{quantity}: {result}")
                 time.sleep(0.5)
 
             CAPITAL_END = executor.get_balance()["data"]["TotalValue"]

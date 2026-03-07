@@ -9,10 +9,10 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 ACCESS_TOKEN = os.getenv("SAXO_ACCESS_TOKEN")
-BASE_URL     = os.getenv("SAXO_BASE_URL")
+BASE_URL = os.getenv("SAXO_BASE_URL")
 
 MAX_RETRIES = 3
-RETRY_DELAY = 2  # seconds
+RETRY_DELAY = 2
 
 
 class SaxoOrderExecutor:
@@ -40,10 +40,7 @@ class SaxoOrderExecutor:
 
     def get_uic(self, symbol: str, asset_type: str = "Stock") -> Optional[int]:
         try:
-            response = self.session.get(
-                f"{self.base_url}/ref/v1/instruments",
-                params={"Keywords": symbol, "AssetTypes": asset_type}
-            )
+            response = self.session.get(f"{self.base_url}/ref/v1/instruments", params={"Keywords": symbol, "AssetTypes": asset_type})
             response.raise_for_status()
             data = response.json().get("Data", [])
             if not data:
@@ -106,10 +103,7 @@ class SaxoOrderExecutor:
 
     def get_positions(self) -> Dict[str, Any]:
         try:
-            response = self.session.get(
-                f"{self.base_url}/port/v1/positions/me",
-                params={"ClientKey": self.account_key}
-            )
+            response = self.session.get( f"{self.base_url}/port/v1/positions/me", params={"ClientKey": self.account_key})
             response.raise_for_status()
             positions = response.json().get('Data', [])
             return {"success": True, "positions": positions, "count": len(positions)}
@@ -118,10 +112,7 @@ class SaxoOrderExecutor:
 
     def get_balance(self) -> Dict[str, Any]:
         try:
-            response = self.session.get(
-                f"{self.base_url}/port/v1/balances/me",
-                params={"ClientKey": self.account_key}
-            )
+            response = self.session.get(f"{self.base_url}/port/v1/balances/me", params={"ClientKey": self.account_key})
             response.raise_for_status()
             return {"success": True, "data": response.json()}
         except Exception as e:
